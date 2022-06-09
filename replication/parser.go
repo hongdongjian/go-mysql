@@ -40,6 +40,10 @@ type BinlogParser struct {
 	useDecimal          bool
 	ignoreJSONDecodeErr bool
 	verifyChecksum      bool
+
+	// The event that needs to be processed by the callback
+	// Do not specify, deal with all events by default
+	DealEvents []EventType
 }
 
 func NewBinlogParser() *BinlogParser {
@@ -134,6 +138,20 @@ func (p *BinlogParser) parseSingleEvent(r io.Reader, onEvent OnEventFunc) (bool,
 	if n, err = io.CopyN(buf, r, int64(h.EventSize-EventHeaderSize)); err != nil {
 		return false, errors.Errorf("get event err %v, need %d but got %d", err, h.EventSize, n)
 	}
+
+	//if p.DealEvents != nil && len(p.DealEvents) > 0 {
+	//	isDeal := false
+	//	for _, v := range p.DealEvents {
+	//		if v == h.EventType {
+	//			isDeal = true
+	//			break
+	//		}
+	//	}
+	//	if !isDeal {
+	//		return false, nil
+	//	}
+	//}
+
 	if buf.Len() != int(h.EventSize) {
 		return false, errors.Errorf("invalid raw data size in event %s, need %d but got %d", h.EventType, h.EventSize, buf.Len())
 	}

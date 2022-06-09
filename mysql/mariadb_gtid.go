@@ -16,12 +16,14 @@ type MariadbGTID struct {
 	DomainID       uint32
 	ServerID       uint32
 	SequenceNumber uint64
+	// DomainID-ServerID
+	Uuid string
 }
 
 // ParseMariadbGTID parses mariadb gtid, [domain ID]-[server-id]-[sequence]
 func ParseMariadbGTID(str string) (*MariadbGTID, error) {
 	if len(str) == 0 {
-		return &MariadbGTID{0, 0, 0}, nil
+		return &MariadbGTID{0, 0, 0, "0-0"}, nil
 	}
 
 	seps := strings.Split(str, "-")
@@ -50,7 +52,8 @@ func ParseMariadbGTID(str string) (*MariadbGTID, error) {
 	return &MariadbGTID{
 		DomainID:       uint32(domainID),
 		ServerID:       uint32(serverID),
-		SequenceNumber: sequenceID}, nil
+		SequenceNumber: sequenceID,
+		Uuid:           fmt.Sprintf("%d-%d", domainID, serverID)}, nil
 }
 
 func (gtid *MariadbGTID) String() string {
@@ -61,9 +64,16 @@ func (gtid *MariadbGTID) String() string {
 	return fmt.Sprintf("%d-%d-%d", gtid.DomainID, gtid.ServerID, gtid.SequenceNumber)
 }
 
+func (gtid *MariadbGTID) getUUID() string {
+	if gtid.Uuid != "" {
+		return gtid.Uuid
+	}
+	return fmt.Sprintf("%d-%d", gtid.DomainID, gtid.ServerID)
+}
+
 // Contain return whether one mariadb gtid covers another mariadb gtid
 func (gtid *MariadbGTID) Contain(other *MariadbGTID) bool {
-	return gtid.DomainID == other.DomainID && gtid.SequenceNumber >= other.SequenceNumber
+	return gtid.getUUID() == other.getUUID() && gtid.SequenceNumber >= other.SequenceNumber
 }
 
 // Clone clones a mariadb gtid
@@ -103,13 +113,13 @@ func (gtid *MariadbGTID) forward(newer *MariadbGTID) error {
 
 // MariadbGTIDSet is a set of mariadb gtid
 type MariadbGTIDSet struct {
-	Sets map[uint32]*MariadbGTID
+	Sets map[string]*MariadbGTID
 }
 
 // ParseMariadbGTIDSet parses str into mariadb gtid sets
 func ParseMariadbGTIDSet(str string) (GTIDSet, error) {
 	s := new(MariadbGTIDSet)
-	s.Sets = make(map[uint32]*MariadbGTID)
+	s.Sets = make(map[string]*MariadbGTID)
 	if str == "" {
 		return s, nil
 	}
@@ -126,14 +136,11 @@ func (s *MariadbGTIDSet) AddSet(gtid *MariadbGTID) error {
 		return nil
 	}
 
-	o, ok := s.Sets[gtid.DomainID]
+	o, ok := s.Sets[gtid.Uuid]
 	if ok {
-		err := o.forward(gtid)
-		if err != nil {
-			return errors.Trace(err)
-		}
+		o.SequenceNumber = gtid.SequenceNumber
 	} else {
-		s.Sets[gtid.DomainID] = gtid
+		s.Sets[gtid.Uuid] = gtid
 	}
 
 	return nil
@@ -182,10 +189,10 @@ func (s *MariadbGTIDSet) Encode() []byte {
 // Clone clones a mariadb gtid set
 func (s *MariadbGTIDSet) Clone() GTIDSet {
 	clone := &MariadbGTIDSet{
-		Sets: make(map[uint32]*MariadbGTID),
+		Sets: make(map[string]*MariadbGTID),
 	}
-	for domainID, gtid := range s.Sets {
-		clone.Sets[domainID] = gtid.Clone()
+	for uuid, gtid := range s.Sets {
+		clone.Sets[uuid] = gtid.Clone()
 	}
 
 	return clone
@@ -202,8 +209,8 @@ func (s *MariadbGTIDSet) Equal(o GTIDSet) bool {
 		return false
 	}
 
-	for domainID, gtid := range other.Sets {
-		o, ok := s.Sets[domainID]
+	for uuid, gtid := range other.Sets {
+		o, ok := s.Sets[uuid]
 		if !ok {
 			return false
 		}
@@ -223,8 +230,8 @@ func (s *MariadbGTIDSet) Contain(o GTIDSet) bool {
 		return false
 	}
 
-	for doaminID, gtid := range other.Sets {
-		o, ok := s.Sets[doaminID]
+	for uuid, gtid := range other.Sets {
+		o, ok := s.Sets[uuid]
 		if !ok {
 			return false
 		}
